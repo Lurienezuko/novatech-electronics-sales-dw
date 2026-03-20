@@ -14,6 +14,7 @@ One row = one completed product sold (quantity can be >1)
 - **dim_date** → time intelligence
   
 <image-card alt="Star Schema Diagram" src="diagrams/star_schema.png" ></image-card>
+
 ![Star Schema Diagram](diagrams/star_schema_novatech.png)
 
 
