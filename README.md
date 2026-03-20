@@ -1,4 +1,3 @@
-# novatech-electronics-sales-dw
 # NovaTech Electronics Sales Data Warehouse
 
 End-to-end production-grade sales analytics DW using cloud-native tools.
