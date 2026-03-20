@@ -13,8 +13,6 @@ One row = one completed product sold (quantity can be >1)
 - **dim_product** → static product info
 - **dim_date** → time intelligence
 
-![Star Schema Diagram](diagrams/star_schema_novatech.png)
-
 <image-card alt="Star Schema Diagram" src="diagrams/star_schema.png" ></image-card>
 
 
