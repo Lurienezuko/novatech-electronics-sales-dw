@@ -20,7 +20,6 @@ Key features:
 - Explodes add-ons purchased in later ETL
 - Filters to completed orders only
 
-## Phase 2 – Transformation Rules 🗺️
-Detailed mapping from raw CSV to star schema: age buckets, add-on explosion (each add-on as separate fact row), SCD Type 2 logic, separate dim_payment, and more.
-
-📄 Full rules & decisions: [docs/phase2_transformation_rules.md](docs/phase2_transformation_rules.md)
+## Phase 2 – Transformation Rules
+See the detailed column mapping, add-on explosion logic, and decisions:  
+[docs/phase2_transformation_rules.md](docs/phase2_transformation_rules.md)
