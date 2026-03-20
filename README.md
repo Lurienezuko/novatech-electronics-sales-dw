@@ -9,6 +9,7 @@ End-to-end production-grade sales analytics DW using cloud-native tools.
 One row = one completed product sold (quantity can be >1)
 
 ### Star Schema Design
+<image-card alt="Star Schema Diagram" src="diagrams/star_schema.png" ></image-card>
 - **fact_sales** → core measures + foreign keys
 - **dim_customer** → SCD Type 2 (loyalty_member changes over time)
 - **dim_product** → static product info
@@ -16,7 +17,6 @@ One row = one completed product sold (quantity can be >1)
 
 ![Star Schema Diagram](diagrams/star_schema_novatech.png)
 
-(or if you used mermaid instead – paste the mermaid code block from earlier message)
 
 Key features:
 - Handles loyalty changes with SCD Type 2
