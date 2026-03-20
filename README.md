@@ -13,7 +13,7 @@ One row = one completed product sold (quantity can be >1)
 - **dim_product** → static product info
 - **dim_date** → time intelligence
 
-<image-card alt="NovaTech Electronics Star Schema" src="diagrams/star_schema.png" ></image-card>
+![NovaTech Electronics Star Schema](diagrams/star_schema.png)
 
 Key features:
 - Handles loyalty changes with SCD Type 2
