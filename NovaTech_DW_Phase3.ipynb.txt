@@ -1,0 +1,394 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": []
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "code",
+      "source": [
+        "import pandas as pd\n",
+        "import duckdb\n",
+        "\n",
+        "# Load the file you already uploaded\n",
+        "# ────────────────────────────────────────\n",
+        "# If the filename in the left sidebar is different (e.g. Electronic_sales... (1).csv),\n",
+        "# double-click the file name in the Files tab to copy the exact name, then paste it below\n",
+        "df = pd.read_csv('Electronic_sales_Sep2023-Sep2024.csv')\n",
+        "\n",
+        "print(\"Dataset loaded\")\n",
+        "print(\"Shape (rows, columns):\", df.shape)\n",
+        "print(\"Columns:\", df.columns.tolist())\n",
+        "print(\"\\nOrder Status counts:\\n\", df['Order Status'].value_counts())\n",
+        "print(\"\\nNumber of Completed orders:\", (df['Order Status'] == 'Completed').sum())"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 0
+        },
+        "id": "ea9iu_5ckCno",
+        "outputId": "7451291b-6592-480a-8379-c3f43502683c"
+      },
+      "execution_count": 21,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Dataset loaded\n",
+            "Shape (rows, columns): (20000, 16)\n",
+            "Columns: ['Customer ID', 'Age', 'Gender', 'Loyalty Member', 'Product Type', 'SKU', 'Rating', 'Order Status', 'Payment Method', 'Total Price', 'Unit Price', 'Quantity', 'Purchase Date', 'Shipping Type', 'Add-ons Purchased', 'Add-on Total']\n",
+            "\n",
+            "Order Status counts:\n",
+            " Order Status\n",
+            "Completed    13432\n",
+            "Cancelled     6568\n",
+            "Name: count, dtype: int64\n",
+            "\n",
+            "Number of Completed orders: 13432\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Keep only Completed orders (Phase 2 rule)\n",
+        "df = df[df['Order Status'] == 'Completed'].copy()\n",
+        "\n",
+        "# Clean Gender: fill missing values with 'Unknown'\n",
+        "df['Gender'] = df['Gender'].fillna('Unknown')\n",
+        "\n",
+        "# Create age_group buckets (exact mapping from your rules doc)\n",
+        "def age_bucket(age):\n",
+        "    if pd.isna(age):\n",
+        "        return 'Unknown'\n",
+        "    age = int(age)\n",
+        "    if age < 18:\n",
+        "        return 'Under 18'\n",
+        "    elif age <= 24:\n",
+        "        return '18-24'\n",
+        "    elif age <= 34:\n",
+        "        return '25-34'\n",
+        "    elif age <= 44:\n",
+        "        return '35-44'\n",
+        "    elif age <= 54:\n",
+        "        return '45-54'\n",
+        "    else:\n",
+        "        return '55+'\n",
+        "\n",
+        "df['age_group'] = df['Age'].apply(age_bucket)\n",
+        "\n",
+        "# Quick validation prints\n",
+        "print(\"After filtering to Completed → shape:\", df.shape)\n",
+        "print(\"\\nGender distribution after cleaning:\\n\", df['Gender'].value_counts())\n",
+        "print(\"\\nAge group distribution:\\n\", df['age_group'].value_counts().sort_index())"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 0
+        },
+        "id": "Ea6Cq7b7kECN",
+        "outputId": "0193846a-e7c4-4624-f324-55f8fe65bbfc"
+      },
+      "execution_count": 22,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "After filtering to Completed → shape: (13432, 17)\n",
+            "\n",
+            "Gender distribution after cleaning:\n",
+            " Gender\n",
+            "Male       6780\n",
+            "Female     6651\n",
+            "Unknown       1\n",
+            "Name: count, dtype: int64\n",
+            "\n",
+            "Age group distribution:\n",
+            " age_group\n",
+            "18-24    1447\n",
+            "25-34    2127\n",
+            "35-44    2247\n",
+            "45-54    2087\n",
+            "55+      5524\n",
+            "Name: count, dtype: int64\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "def explode_addons(row):\n",
+        "    rows = []\n",
+        "\n",
+        "    # 1. Always include the main product row\n",
+        "    main = row.to_dict()\n",
+        "    main['is_addon'] = False\n",
+        "    main['addon_type'] = None\n",
+        "    rows.append(main)\n",
+        "\n",
+        "    # 2. Handle add-ons if they exist\n",
+        "    addons_str = row['Add-ons Purchased']\n",
+        "    addon_total = row['Add-on Total'] if pd.notna(row['Add-on Total']) else 0.0\n",
+        "\n",
+        "    if pd.notna(addons_str) and isinstance(addons_str, str) and addons_str.strip():\n",
+        "        addons_list = [a.strip() for a in addons_str.split(',') if a.strip()]\n",
+        "        if addons_list:\n",
+        "            # Distribute the total addon amount equally across add-ons\n",
+        "            split_value = addon_total / len(addons_list)\n",
+        "\n",
+        "            for addon in addons_list:\n",
+        "                addon_row = row.to_dict()\n",
+        "                addon_row['Product Type'] = addon              # override with addon name\n",
+        "                addon_row['SKU'] = None                        # no SKU for add-ons\n",
+        "                addon_row['Unit Price'] = 0.0\n",
+        "                addon_row['Total Price'] = split_value\n",
+        "                addon_row['Add-on Total'] = split_value        # per addon\n",
+        "                addon_row['is_addon'] = True\n",
+        "                addon_row['addon_type'] = addon\n",
+        "                rows.append(addon_row)\n",
+        "\n",
+        "    return rows\n",
+        "\n",
+        "# Apply the explosion to every row\n",
+        "exploded_rows = []\n",
+        "for idx, row in df.iterrows():\n",
+        "    exploded_rows.extend(explode_addons(row))\n",
+        "\n",
+        "# Create the fact table\n",
+        "fact_sales = pd.DataFrame(exploded_rows)\n",
+        "\n",
+        "# Validation prints\n",
+        "print(\"Fact table rows after explosion:\", len(fact_sales))\n",
+        "print(\"Original completed rows:\", len(df))\n",
+        "print(\"Explosion multiplier:\", round(len(fact_sales) / len(df), 2), \"×\")\n",
+        "print(\"\\nPercentage of rows that are add-ons:\",\n",
+        "      round((fact_sales['is_addon'].sum() / len(fact_sales)) * 100, 1), \"%\")\n",
+        "\n",
+        "# Quick peek at a few rows with add-ons (if any exist)\n",
+        "sample_with_addons = fact_sales[fact_sales['is_addon']].head(3)\n",
+        "if not sample_with_addons.empty:\n",
+        "    print(\"\\nSample add-on rows:\")\n",
+        "    print(sample_with_addons[['Customer ID', 'Product Type', 'addon_type', 'Total Price', 'is_addon']])\n",
+        "else:\n",
+        "    print(\"\\nNo add-ons found in this sample — that's possible if few orders have add-ons.\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 0
+        },
+        "id": "wIhCUwaSkZDb",
+        "outputId": "b20fbd38-98a9-4a42-9e3f-4479dd8f38aa"
+      },
+      "execution_count": 23,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Fact table rows after explosion: 33746\n",
+            "Original completed rows: 13432\n",
+            "Explosion multiplier: 2.51 ×\n",
+            "\n",
+            "Percentage of rows that are add-ons: 60.2 %\n",
+            "\n",
+            "Sample add-on rows:\n",
+            "   Customer ID  Product Type    addon_type  Total Price  is_addon\n",
+            "1         1000  Impulse Item  Impulse Item        26.09      True\n",
+            "4         1002  Impulse Item  Impulse Item        30.08      True\n",
+            "5         1002  Impulse Item  Impulse Item        30.08      True\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Build dim_customer with SCD Type 2 logic using DuckDB for window functions\n",
+        "dim_customer = duckdb.sql(\"\"\"\n",
+        "    WITH customer_orders AS (\n",
+        "        SELECT DISTINCT\n",
+        "            \"Customer ID\" AS customer_id,\n",
+        "            age_group,\n",
+        "            Gender AS gender,\n",
+        "            \"Loyalty Member\" AS loyalty_status,\n",
+        "            \"Purchase Date\" AS transaction_date\n",
+        "        FROM fact_sales\n",
+        "        ORDER BY \"Customer ID\", \"Purchase Date\"\n",
+        "    ),\n",
+        "    with_versions AS (\n",
+        "        SELECT\n",
+        "            customer_id,\n",
+        "            age_group,\n",
+        "            gender,\n",
+        "            loyalty_status,\n",
+        "            transaction_date AS valid_from,\n",
+        "            LEAD(transaction_date) OVER (PARTITION BY customer_id ORDER BY transaction_date) AS valid_to,\n",
+        "            ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY transaction_date) AS version\n",
+        "        FROM customer_orders\n",
+        "        -- Only keep rows where loyalty status actually changes (or first record)\n",
+        "        QUALIFY\n",
+        "            loyalty_status != LAG(loyalty_status) OVER (PARTITION BY customer_id ORDER BY transaction_date)\n",
+        "            OR LAG(loyalty_status) OVER (PARTITION BY customer_id ORDER BY transaction_date) IS NULL\n",
+        "    )\n",
+        "    SELECT\n",
+        "        customer_id,\n",
+        "        age_group,\n",
+        "        gender,\n",
+        "        loyalty_status,\n",
+        "        valid_from,\n",
+        "        COALESCE(valid_to, '9999-12-31') AS valid_to,\n",
+        "        version AS customer_surrogate_key,\n",
+        "        CASE WHEN valid_to = '9999-12-31' THEN True ELSE False END AS is_current\n",
+        "    FROM with_versions\n",
+        "    ORDER BY customer_id, version\n",
+        "\"\"\").df()\n",
+        "\n",
+        "# Validation\n",
+        "print(\"dim_customer shape:\", dim_customer.shape)\n",
+        "print(\"Number of unique customers:\", dim_customer['customer_id'].nunique())\n",
+        "print(\"\\nSample (first 10 rows):\")\n",
+        "print(dim_customer.head(10)[['customer_id', 'loyalty_status', 'valid_from', 'valid_to', 'is_current', 'customer_surrogate_key']])\n",
+        "\n",
+        "# Optional: Check how many customers have >1 version (loyalty changed)\n",
+        "print(\"\\nCustomers with loyalty status change:\",\n",
+        "      dim_customer.groupby('customer_id').size().gt(1).sum())"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 0
+        },
+        "id": "jswoXC_3kkOi",
+        "outputId": "6e6f8d13-640d-4723-852b-c63533c65fc5"
+      },
+      "execution_count": 24,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "dim_customer shape: (10854, 8)\n",
+            "Number of unique customers: 9466\n",
+            "\n",
+            "Sample (first 10 rows):\n",
+            "   customer_id loyalty_status  valid_from    valid_to  is_current  \\\n",
+            "0         1000             No  2024-04-20  9999-12-31       False   \n",
+            "1         1002             No  2023-10-17  2024-08-09       False   \n",
+            "2         1002            Yes  2024-08-09  9999-12-31       False   \n",
+            "3         1003            Yes  2024-05-21  9999-12-31       False   \n",
+            "4         1004             No  2024-05-26  9999-12-31       False   \n",
+            "5         1005             No  2024-01-30  2024-06-24       False   \n",
+            "6         1006            Yes  2024-01-01  2024-06-25       False   \n",
+            "7         1008             No  2023-09-25  9999-12-31       False   \n",
+            "8         1011             No  2024-07-07  9999-12-31       False   \n",
+            "9         1014            Yes  2024-05-18  9999-12-31       False   \n",
+            "\n",
+            "   customer_surrogate_key  \n",
+            "0                       1  \n",
+            "1                       1  \n",
+            "2                       2  \n",
+            "3                       1  \n",
+            "4                       1  \n",
+            "5                       1  \n",
+            "6                       1  \n",
+            "7                       1  \n",
+            "8                       1  \n",
+            "9                       1  \n",
+            "\n",
+            "Customers with loyalty status change: 1214\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# 1. dim_product – unique products (main + add-on names)\n",
+        "dim_product = fact_sales[['Product Type', 'SKU']].drop_duplicates().reset_index(drop=True)\n",
+        "dim_product['product_surrogate_key'] = range(1, len(dim_product) + 1)\n",
+        "\n",
+        "print(\"dim_product shape:\", dim_product.shape)\n",
+        "print(\"Unique product types:\", dim_product['Product Type'].nunique())\n",
+        "print(\"\\nSample products:\")\n",
+        "print(dim_product.head(10))\n",
+        "\n",
+        "# 2. Minimal dim_date (you can expand later with year, month, quarter, etc.)\n",
+        "fact_sales['Purchase Date'] = pd.to_datetime(fact_sales['Purchase Date'])\n",
+        "dim_date = fact_sales[['Purchase Date']].drop_duplicates().sort_values('Purchase Date').reset_index(drop=True)\n",
+        "dim_date['date_key'] = dim_date.index + 1\n",
+        "dim_date['date'] = dim_date['Purchase Date']\n",
+        "dim_date['year'] = dim_date['date'].dt.year\n",
+        "dim_date['month'] = dim_date['date'].dt.month\n",
+        "dim_date['day'] = dim_date['date'].dt.day\n",
+        "dim_date = dim_date.drop(columns=['Purchase Date'])  # clean up\n",
+        "\n",
+        "print(\"\\ndim_date shape:\", dim_date.shape)\n",
+        "print(\"Date range:\", dim_date['date'].min(), \"to\", dim_date['date'].max())\n",
+        "\n",
+        "# 3. Save everything (download from Colab Files sidebar)\n",
+        "fact_sales.to_parquet('fact_sales.parquet', index=False)\n",
+        "dim_customer.to_parquet('dim_customer.parquet', index=False)\n",
+        "dim_product.to_parquet('dim_product.parquet', index=False)\n",
+        "dim_date.to_parquet('dim_date.parquet', index=False)\n",
+        "\n",
+        "print(\"\\n✅ All Parquet files saved! Go to left sidebar → Files tab → right-click each .parquet → Download\")\n",
+        "print(\"Also download your notebook: File → Download .ipynb\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 0
+        },
+        "id": "LDTNBV9ZktN1",
+        "outputId": "3d53fdaf-f3d9-4db2-fbe5-7bc33b772ced"
+      },
+      "execution_count": 25,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "dim_product shape: (16, 3)\n",
+            "Unique product types: 8\n",
+            "\n",
+            "Sample products:\n",
+            "        Product Type      SKU  product_surrogate_key\n",
+            "0             Tablet  SKU1002                      1\n",
+            "1       Impulse Item     None                      2\n",
+            "2             Laptop  SKU1005                      3\n",
+            "3         Smartphone  SKU1004                      4\n",
+            "4         Smartphone  SKU1001                      5\n",
+            "5          Accessory     None                      6\n",
+            "6         Smartwatch  SKU1003                      7\n",
+            "7  Extended Warranty     None                      8\n",
+            "8         Headphones  SKU1003                      9\n",
+            "9             Laptop  SKU1004                     10\n",
+            "\n",
+            "dim_date shape: (366, 5)\n",
+            "Date range: 2023-09-24 00:00:00 to 2024-09-23 00:00:00\n",
+            "\n",
+            "✅ All Parquet files saved! Go to left sidebar → Files tab → right-click each .parquet → Download\n",
+            "Also download your notebook: File → Download .ipynb\n"
+          ]
+        }
+      ]
+    }
+  ]
+}
