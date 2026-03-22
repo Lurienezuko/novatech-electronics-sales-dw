@@ -23,3 +23,18 @@ Key features:
 ## Phase 2 – Transformation Rules
 See the detailed column mapping, add-on explosion logic, and decisions:  
 [docs/phase2_transformation_rules.md](docs/phase2_transformation_rules.md)
+
+## Phase 3 – Implementation (Samsung Tab S10 FE + Colab)
+
+Built star schema prototype:
+- fact_sales: 33,746 rows (exploded grain: main + add-ons)
+- dim_customer: 10,854 rows (SCD Type 2 on loyalty changes)
+- dim_product & dim_date stubs
+
+Key metrics:
+- Explosion multiplier: 2.51×
+- Add-on rows: 60.2%
+- Loyalty changers: 1,214 customers
+
+Tools used: pandas + DuckDB in Google Colab (no Termux needed)
+Next: Migrate to PySpark + Supabase / dbt
